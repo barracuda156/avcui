@@ -82,6 +82,17 @@ static std::string run_queries(int timeout_ms) {
         if (ms > timeout_ms) break;
     }
     (void)saw_da1;
+    // Drain and discard anything still sitting unread in the kernel's tty input
+    // queue — a straggling reply from one of the earlier queries (DA3, DA2,
+    // XTVERSION, XTGETTCAP, or the cell-size query) that arrives after we stop
+    // reading, or that a slow terminal hasn't finished flushing yet. Left
+    // undrained, those bytes wait in the queue until ncurses' initscr()/getch()
+    // reads them moments later and delivers them as if the user had typed them,
+    // which is what put stray escape-sequence text ("[?1;2c"-style garbage) in
+    // the search box right after startup. Only terminal-reply bytes can be
+    // discarded here — nothing the user typed in this ~250ms pre-UI window is
+    // meaningful anyway.
+    tcflush(STDIN_FILENO, TCIFLUSH);
     tcsetattr(STDIN_FILENO, TCSANOW, &old);
     return resp;
 }

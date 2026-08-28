@@ -48,6 +48,38 @@ using ThumbData = std::vector<ThumbLine>;
 
 class Thumbnails {
 public:
+    // ── Render-output cache ──────────────────────────────────────────────────
+    // render_color()/render()/render_graphics() are called from TUI::render(),
+    // which runs every frame (~30fps while the app idles on input) for whichever
+    // thumbnail is currently visible. Without caching that means re-forking a
+    // chafa subprocess and re-parsing its output ~30 times a SECOND for an image
+    // that never changed — enough of the frame budget to make getch() polling
+    // fall behind, so keypresses feel dropped or need a second press.
+    //
+    // The image for a given (video_id, cols, rows[, mode]) never changes once
+    // downloaded — download_async() bails out on is_cached(), so a thumbnail is
+    // never re-fetched or replaced — making the key safe to cache on. Capped at
+    // a handful of entries since only a couple of distinct thumbnails are ever
+    // visible at a time (the selected result, or a playlist item).
+    template <typename T>
+    struct RenderCache {
+        struct Entry { std::string key; T value; };
+        std::vector<Entry> entries;
+        static constexpr size_t kMax = 12;
+
+        const T* find(const std::string& key) const {
+            for (auto& e : entries) if (e.key == key) return &e.value;
+            return nullptr;
+        }
+        void put(const std::string& key, T value) {
+            entries.push_back({key, std::move(value)});
+            if (entries.size() > kMax) entries.erase(entries.begin());
+        }
+    };
+    static std::string cache_key(const std::string& id, int cols, int rows, int mode = 0) {
+        return id + '|' + std::to_string(cols) + 'x' + std::to_string(rows) + '|' + std::to_string(mode);
+    }
+
     // ── Cache ────────────────────────────────────────────────────────────────
     static std::string cache_dir() {
         const char* xdg = getenv("XDG_CACHE_HOME");
@@ -194,6 +226,10 @@ public:
     // Called only when COLORS >= 256 && COLOR_PAIRS >= THUMB_COLOR_BASE + 256.
     static ThumbData render_color(const std::string& video_id, int cols, int rows) {
         if (!is_cached(video_id) || cols <= 0 || rows <= 0) return {};
+        static RenderCache<ThumbData> cache;
+        std::string key = cache_key(video_id, cols, rows, /*mode=*/0);
+        if (const ThumbData* hit = cache.find(key)) return *hit;
+
         std::string path = thumb_path(video_id);
         char cmd[1024];
         // In non-UTF-8 locales the Unicode block glyphs chafa emits by default
@@ -209,13 +245,19 @@ public:
         char buf[4096];
         while (fgets(buf, sizeof(buf), pipe)) raw += buf;
         pclose(pipe);
-        return parse_ansi(raw);
+        ThumbData result = parse_ansi(raw);
+        cache.put(key, result);
+        return result;
     }
 
     // ── render: monochrome fallback (--colors=none) ───────────────────────────
     // Zero ANSI sequences — safe to feed directly into ncurses addstr().
     static std::string render(const std::string& video_id, int cols, int rows) {
         if (!is_cached(video_id) || cols <= 0 || rows <= 0) return "";
+        static RenderCache<std::string> cache;
+        std::string key = cache_key(video_id, cols, rows, /*mode=*/1);
+        if (const std::string* hit = cache.find(key)) return *hit;
+
         std::string path = thumb_path(video_id);
         char cmd[1024];
         const char* sym = TermCaps::get().unicode ? "" : "--symbols ascii ";
@@ -228,6 +270,7 @@ public:
         char buf[4096];
         while (fgets(buf, sizeof(buf), pipe)) result += buf;
         pclose(pipe);
+        cache.put(key, result);
         return result;
     }
 
@@ -343,6 +386,11 @@ public:
             long ms = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_usec - start.tv_usec) / 1000;
             if (ms > timeout_ms) break;
         }
+        // Discard any unread straggler bytes before handing the tty back to
+        // cooked mode — see the matching fix in termcaps.cpp::run_queries for
+        // why (a late reply here would otherwise leak into ncurses as garbage
+        // keystrokes once initscr() starts reading).
+        tcflush(STDIN_FILENO, TCIFLUSH);
         tcsetattr(STDIN_FILENO, TCSANOW, &old);
 
         // Parse "\033[6;H;Wt"
@@ -399,6 +447,7 @@ public:
                     + (now.tv_usec - start.tv_usec) / 1000;
             if (ms > timeout_ms) break;
         }
+        tcflush(STDIN_FILENO, TCIFLUSH);   // drop any straggler bytes (see run_queries)
         tcsetattr(STDIN_FILENO, TCSANOW, &old);
         // Response is like ESC[?62;4;6;9;...c  — ";4" / "?...;4;" means sixel.
         if (resp.find(";4;") != std::string::npos ||
@@ -417,12 +466,15 @@ public:
                                         int cols, int rows) {
         if (mode == Gfx::None || mode == Gfx::Blocks) return "";
         if (!is_cached(video_id) || cols <= 0 || rows <= 0) return "";
+        static RenderCache<std::string> cache;
+        std::string key = cache_key(video_id, cols, rows, /*mode=*/100 + (int)mode);
+        if (const std::string* hit = cache.find(key)) return *hit;
         std::string path = thumb_path(video_id);
 
 #ifdef USE_LIBSIXEL
         if (mode == Gfx::Sixel) {
             std::string s = sixel_encode_file(path, cols, rows);
-            if (!s.empty()) return s;
+            if (!s.empty()) { cache.put(key, s); return s; }
             // fall through to chafa if libsixel failed
         }
 #endif
@@ -449,6 +501,7 @@ public:
         size_t got;
         while ((got = fread(buf, 1, sizeof(buf), pipe)) > 0) out.append(buf, got);
         pclose(pipe);
+        cache.put(key, out);
         return out;
     }
 

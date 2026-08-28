@@ -211,15 +211,17 @@ bool InputHandler::handle(int ch, AppState& state) {
             if (mx < lw) {
                 int vid_idx = (my - start_y - 2) + state.playlist_video_scroll;
                 if (vid_idx >= 0) {
-                    if (state.playlist_video_idx == vid_idx && state.focus == Panel::PlaylistView) {
-                        state.focus = Panel::PlaylistActions;
-                        state.actions_visible = true;
-                        state.selected_action = 0;
-                    } else {
-                        state.playlist_video_idx = vid_idx;
-                        state.focus = Panel::PlaylistView;
-                        state.actions_visible = false;
-                    }
+                    // A click both selects the row AND opens its actions in one
+                    // step (matching what Enter does on an already-selected
+                    // row). Requiring a second click to confirm a selection the
+                    // mouse just made is exactly the "clicks need a double
+                    // press" feel; a single click choosing an item should act
+                    // on it. The actions panel renders the thumbnail too, so
+                    // nothing is lost by skipping the select-only state.
+                    state.playlist_video_idx = vid_idx;
+                    state.focus = Panel::PlaylistActions;
+                    state.actions_visible = true;
+                    state.selected_action = 0;
                 }
             } else {
                 state.focus = Panel::PlaylistActions;
@@ -280,14 +282,15 @@ bool InputHandler::handle(int ch, AppState& state) {
             if (mx < lw && !state.results.empty()) {
                 int result_idx = (my - start_y - 1) + state.results_scroll;
                 if (result_idx >= 0 && result_idx < (int)state.results.size()) {
-                    if (state.selected_result == result_idx) {
-                        state.actions_visible = true;
-                        state.focus = Panel::Actions;
-                        state.selected_action = 0;
-                    } else {
-                        state.selected_result = result_idx;
-                        clamp_scroll(state);
-                    }
+                    // Select and open actions in a single click — previously a
+                    // click on an unselected row only selected it, and a second
+                    // click on that now-selected row was needed to open its
+                    // actions. Keyboard (Enter) never needed that extra step.
+                    state.selected_result = result_idx;
+                    clamp_scroll(state);
+                    state.actions_visible = true;
+                    state.focus = Panel::Actions;
+                    state.selected_action = 0;
                 }
             }
         }
@@ -442,21 +445,46 @@ bool InputHandler::handle_search_input(int ch, AppState& state) {
         default:
             if (ch >= 32 && ch < 127) {
                 state.search_query += (char)ch;
-            } else if (ch >= 128) {
+            } else if (ch >= 128 && ch <= 255) {
+                // A raw UTF-8 lead byte from getch()'s byte-at-a-time delivery.
+                // Anything >= 256 is an ncurses symbolic KEY_* code (arrows,
+                // function keys, Home/End/PageUp/Down, kitty-protocol keys, ...)
+                // and never a byte of input text — but some of those numeric
+                // values collide with the 0xC0-0xFF lead-byte pattern once
+                // truncated to a byte, which made this branch swallow an
+                // unrelated special key as the start of a multibyte character,
+                // then consume the *next* real keystroke(s) hunting for
+                // continuation bytes that were never coming. Bounding to
+                // 128..255 is what the old `ch >= 128` check should have been.
                 unsigned char lead = (unsigned char)ch;
                 int need = 0;
                 if      ((lead & 0xE0) == 0xC0) need = 1;
                 else if ((lead & 0xF0) == 0xE0) need = 2;
                 else if ((lead & 0xF8) == 0xF0) need = 3;
                 else return false;
+                size_t mark = state.search_query.size();
                 state.search_query += (char)ch;
                 timeout(50);
                 for (int i = 0; i < need; i++) {
                     int b = getch();
-                    if (b == ERR || (b & 0xC0) != 0x80) { state.search_query.pop_back(); break; }
+                    if (b == ERR || b > 255 || (b & 0xC0) != 0x80) {
+                        // Not a continuation byte — it's the next real event
+                        // (keystroke, click, resize...). Push it back rather
+                        // than swallowing it, and drop the WHOLE partial
+                        // sequence built so far, not just the last byte, so a
+                        // truncated multibyte character can't linger in the
+                        // query and corrupt every glyph rendered after it.
+                        if (b != ERR) ungetch(b);
+                        state.search_query.resize(mark);
+                        break;
+                    }
                     state.search_query += (char)b;
                 }
-                timeout(100);
+                // Restore the app's normal 33ms poll rate (set once in
+                // TUI::init()). This used to hardcode 100ms, permanently
+                // slowing input for the rest of the session after the very
+                // first non-ASCII character was typed.
+                timeout(33);
             }
             return false;
     }

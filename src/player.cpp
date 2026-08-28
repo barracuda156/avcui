@@ -96,14 +96,31 @@ void Player::tick() {
     ipc_.pump();                                 // drain events, refresh cache
 }
 
+// Seeks go through an absolute, position-aware target rather than a bare
+// "relative" command. Two reasons: (1) it's deterministic — a relative seek
+// fired again before mpv has finished the previous one (a real risk here, where
+// every stream is a CDN byte-range request that can take noticeably longer than
+// a local file) can't drift or compound, since each press recomputes its target
+// from mpv's own last-known position; (2) it lets us clamp to [0, duration]
+// ourselves rather than relying on however mpv's relative clamping behaves at
+// the ends of the stream. Falls back to a relative nudge only when we have no
+// cached position yet (right after playback starts, before mpv's first
+// observe_property push arrives).
 bool Player::seek_forward(double secs) {
-    if (ipc_.connected()) return ipc_.seek(secs);
-    return false;
+    if (!ipc_.connected()) return false;
+    double pos = ipc_.position();
+    if (pos < 0) return ipc_.seek(secs);
+    double dur = ipc_.duration();
+    double target = pos + secs;
+    if (dur > 0 && target > dur) target = dur;
+    return ipc_.seek_absolute(target);
 }
 
 bool Player::seek_backward(double secs) {
-    if (ipc_.connected()) return ipc_.seek(-secs);
-    return false;
+    if (!ipc_.connected()) return false;
+    double pos = ipc_.position();
+    if (pos < 0) return ipc_.seek(-secs);
+    return ipc_.seek_absolute(pos - secs);
 }
 
 bool Player::is_playing() const {
