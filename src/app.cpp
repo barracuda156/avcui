@@ -630,6 +630,12 @@ int App::run() {
             player_.seek_backward(10.0);
             state_.status_message = "<< -10s";
         }
+        else if (state_.status_message == "__SEEK_TO__") {
+            player_.seek_to(state_.seek_to_secs);
+            int t = (int)state_.seek_to_secs;
+            char sbuf[32]; snprintf(sbuf, sizeof(sbuf), ">> %d:%02d", t / 60, t % 60);
+            state_.status_message = sbuf;
+        }
 
         // ── Streamlined-mode section loaders & playback ───────────────────────
         if (state_.status_message == "__STREAM_SEC_LIBRARY__" ||

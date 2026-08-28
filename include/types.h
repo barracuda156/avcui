@@ -106,6 +106,11 @@ struct AppState {
     double playback_dur  = 0.0;   // total duration in seconds
     int    playback_vol  = 80;    // current volume %
 
+    // Set by a waveform click in streamlined mode (see input.cpp's
+    // stream_handle); app.cpp reads this once on the "__SEEK_TO__" status
+    // message and issues the actual mpv seek.
+    double seek_to_secs  = 0.0;
+
     // Background metadata pass (see Enricher). enrich_total is 0 when idle.
     int enrich_done  = 0;
     int enrich_total = 0;

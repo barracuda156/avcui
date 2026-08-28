@@ -88,6 +88,40 @@ static bool stream_handle(int ch, AppState& state) {
             return false;
 
         case StreamScreen::Playing:
+            if (ch == KEY_MOUSE) {
+                MEVENT ev;
+                if (getmouse(&ev) != OK) return false;
+                if (!(ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) return false;
+                if (state.playback_dur <= 0.5) return false;   // nothing to seek in yet
+
+                // Waveform row / x-range — MUST mirror TUI::stream_playing()'s
+                // layout math exactly, or a click lands on the wrong point of
+                // the bar. Same convention as the normal-mode hit-testing in
+                // handle() below.
+                int W = state.term_w, H = state.term_h;
+                int wf_y = 1;
+                if (state.thumbs_available && !state.stream_now.id.empty() && H > 13) {
+                    int art_w = std::min(W - 4, (H - 10) * 2); if (art_w < 6) art_w = W - 4;
+                    int art_rows = std::max(3, art_w / 2); if (art_rows > H - 10) art_rows = H - 10;
+                    wf_y += art_rows + 1;
+                } else {
+                    wf_y = 2;
+                }
+                // stream_playing() only draws the waveform when it fits; if it
+                // was never drawn there is nothing at that row to click.
+                if (wf_y >= H - 5) return false;
+
+                int wf = W - 6; if (wf < 4) wf = W - 2;
+                int wx = (W - wf) / 2; if (wx < 1) wx = 1;
+
+                if (ev.y == wf_y && ev.x >= wx && ev.x < wx + wf) {
+                    double frac = wf > 1 ? double(ev.x - wx) / double(wf - 1) : 0.0;
+                    frac = std::clamp(frac, 0.0, 1.0);
+                    state.seek_to_secs = frac * state.playback_dur;
+                    state.status_message = "__SEEK_TO__";
+                }
+                return false;
+            }
             if (ch == ' ') state.status_message = "__PAUSE_TOGGLE__";
             else if (ch == '+') state.status_message = "__VOLUME_UP__";
             else if (ch == '-') state.status_message = "__VOLUME_DOWN__";

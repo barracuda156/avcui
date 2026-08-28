@@ -123,6 +123,18 @@ bool Player::seek_backward(double secs) {
     return ipc_.seek_absolute(pos - secs);
 }
 
+// Used by the streamlined-mode waveform click-to-seek: secs is already an
+// absolute target (computed from the click's fraction across the bar), so this
+// only has to clamp it to the known duration.
+bool Player::seek_to(double secs) {
+    if (!ipc_.connected()) return false;
+    double dur = ipc_.duration();
+    double target = secs;
+    if (target < 0) target = 0;
+    if (dur > 0 && target > dur) target = dur;
+    return ipc_.seek_absolute(target);
+}
+
 bool Player::is_playing() const {
     if (!playing_ || mpv_pid_ <= 0) return false;
     int status = 0;
