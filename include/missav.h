@@ -48,6 +48,10 @@ public:
     // same way — see Thumbnails::set_referer().
     static std::vector<std::string> mpv_header_args();
 
+    // Raw "Name: value" headers the stream CDN requires (Referer, Origin,
+    // User-Agent). mpv_header_args() is derived from this list.
+    static std::vector<std::string> http_headers();
+
     // Referer/User-Agent this provider's image CDN expects.
     static const char* referer();
     static const char* user_agent();

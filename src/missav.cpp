@@ -148,15 +148,22 @@ static std::string safe_id(const std::string& raw) {
 const char* MissAV::referer()    { return "https://missav.ws/"; }
 const char* MissAV::user_agent() { return kUserAgent; }
 
+std::vector<std::string> MissAV::http_headers() {
+    return {
+        std::string("Referer: ")    + referer(),
+        std::string("Origin: ")     + kSite,
+        std::string("User-Agent: ") + kUserAgent,
+    };
+}
+
 std::vector<std::string> MissAV::mpv_header_args() {
     // One --http-header-fields-append per header: the plain --http-header-fields
     // form is a comma-separated list, and a User-Agent containing commas would
     // be split into garbage.
-    return {
-        std::string("--http-header-fields-append=Referer: ") + referer(),
-        std::string("--http-header-fields-append=Origin: ") + kSite,
-        std::string("--http-header-fields-append=User-Agent: ") + kUserAgent,
-    };
+    std::vector<std::string> out;
+    for (const auto& h : http_headers())
+        out.push_back("--http-header-fields-append=" + h);
+    return out;
 }
 
 // ─── meta tag extraction ──────────────────────────────────────────────────────

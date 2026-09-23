@@ -27,6 +27,12 @@
 
 namespace ytui {
 
+// Browser User-Agent for image CDNs that reject non-browser fetches. Same
+// literal as Thumbnails::kUserAgent in thumbs.h.
+inline constexpr const char* kBrowserUserAgent =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
 class Provider {
 public:
     virtual ~Provider() = default;
@@ -59,6 +65,12 @@ public:
 
     // Referer this provider's image CDN expects.
     virtual const char* thumb_referer() const = 0;
+
+    // Raw HTTP headers a non-mpv player (ffmpeg/GStreamer) must send to the
+    // stream CDN. Empty when the stream needs none.
+    virtual std::vector<std::string> stream_headers() const = 0;
+    // User-Agent the thumbnail CDN expects (paired with thumb_referer()).
+    virtual const char* thumb_user_agent() const = 0;
 
     // Uploader/channel page, or "" if the provider has no such concept.
     virtual std::string channel_url(const Video& v) const = 0;
@@ -93,6 +105,8 @@ public:
     bool direct_stream() const override { return false; }
     std::vector<std::string> mpv_args() const override { return {}; }
     const char* thumb_referer() const override { return "https://www.pornhub.com/"; }
+    std::vector<std::string> stream_headers() const override { return {}; }
+    const char* thumb_user_agent() const override { return kBrowserUserAgent; }
 
     std::string channel_url(const Video& v) const override {
         // The extractor gives an uploader name, not an opaque channel id.
@@ -176,6 +190,8 @@ public:
     bool direct_stream() const override { return true; }
     std::vector<std::string> mpv_args() const override { return MissAV::mpv_header_args(); }
     const char* thumb_referer() const override { return MissAV::referer(); }
+    std::vector<std::string> stream_headers() const override { return MissAV::http_headers(); }
+    const char* thumb_user_agent() const override { return MissAV::user_agent(); }
     std::string channel_url(const Video&) const override { return ""; }
 
 private:
