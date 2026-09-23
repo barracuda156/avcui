@@ -48,6 +48,15 @@ add_library(avcui::curl ALIAS avcui_curl)
 if(AVCUI_CURL_IMPERSONATE AND CURL_IMPERSONATE_LIBRARY)
     message(STATUS "avcui: using curl-impersonate (${CURL_IMPERSONATE_LIBRARY})")
     target_include_directories(avcui_curl INTERFACE ${CURL_INCLUDE_DIRS})
+    # curl-impersonate builds may carry a static LLVM libunwind and EXPORT its
+    # _Unwind_* entry points. On ELF those interpose libgcc_s's for the whole
+    # process, and then every C++ exception terminates even when caught.
+    # Linking libgcc_s first puts its unwinder ahead in symbol lookup. Mach-O
+    # binds symbols to the library they were linked against: not needed there.
+    if(NOT APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_link_libraries(avcui_curl INTERFACE
+            "-Wl,--push-state,--no-as-needed" gcc_s "-Wl,--pop-state")
+    endif()
     target_link_libraries(avcui_curl INTERFACE "${CURL_IMPERSONATE_LIBRARY}")
 else()
     message(WARNING "avcui: curl-impersonate not found; MissAV pages and streams will 403")

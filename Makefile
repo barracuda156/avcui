@@ -97,9 +97,19 @@ ifneq ($(CURL_IMPERSONATE),0)
         /opt/local/lib/libcurl-impersonate.dylib \
         /opt/homebrew/lib/libcurl-impersonate.dylib))
 endif
+# curl-impersonate builds may carry a static LLVM libunwind and EXPORT its
+# _Unwind_* entry points. On ELF those interpose libgcc_s's for the whole
+# process, and then every C++ exception terminates even when caught. Listing
+# libgcc_s first puts its unwinder ahead in symbol lookup. (Mach-O binds each
+# library's symbols to where they were linked, so macOS is not affected.)
+ifeq ($(OS_TYPE),macos)
+    CURL_UNWIND_FIRST :=
+else
+    CURL_UNWIND_FIRST := -Wl,--push-state,--no-as-needed -lgcc_s -Wl,--pop-state
+endif
 ifneq ($(CURL_IMPERSONATE_LIB),)
     CURL_IMPERSONATE_DIR := $(patsubst %/,%,$(dir $(CURL_IMPERSONATE_LIB)))
-    CURL_LIBS ?= -L$(CURL_IMPERSONATE_DIR) -Wl,-rpath,$(CURL_IMPERSONATE_DIR) -lcurl-impersonate
+    CURL_LIBS ?= $(CURL_UNWIND_FIRST) -L$(CURL_IMPERSONATE_DIR) -Wl,-rpath,$(CURL_IMPERSONATE_DIR) -lcurl-impersonate
 endif
 CURL_LIBS     ?= $(shell pkg-config --libs libcurl 2>/dev/null || echo "-lcurl")
 CRYPTO_CFLAGS ?= $(shell pkg-config --cflags libcrypto 2>/dev/null)
