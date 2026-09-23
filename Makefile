@@ -76,8 +76,8 @@ CXXFLAGS += $(NCURSES_CFLAGS)
 
 # ─── libcurl + libcrypto (native MissAV provider) ───────────────────────────────
 # src/missav.cpp talks to MissAV's Recombee backend directly: libcurl for HTTP,
-# libcrypto for the HMAC-SHA1 request signing. Both are overridable so a
-# packager can point CURL_* at curl-impersonate for browser TLS fingerprints:
+# libcrypto for the HMAC-SHA1 request signing. Both are overridable so
+# a packager can point CURL_* at curl-impersonate for browser TLS fingerprints:
 #
 #   make CURL_CFLAGS="-I<prefix>/include" CURL_LIBS="-L<prefix>/lib -lcurl-impersonate"
 #
@@ -89,13 +89,12 @@ CXXFLAGS += $(NCURSES_CFLAGS)
 CURL_CFLAGS   ?= $(shell pkg-config --cflags libcurl 2>/dev/null)
 ifneq ($(CURL_IMPERSONATE),0)
     CURL_IMPERSONATE_LIB := $(firstword $(wildcard \
-        $(HOME)/.local/lib/libcurl-impersonate.so \
         /usr/local/lib/libcurl-impersonate.so \
         /usr/lib/libcurl-impersonate.so \
-        /usr/lib/x86_64-linux-gnu/libcurl-impersonate.so \
-        /usr/lib/aarch64-linux-gnu/libcurl-impersonate.so \
         /opt/local/lib/libcurl-impersonate.dylib \
-        /opt/homebrew/lib/libcurl-impersonate.dylib))
+        /usr/local/lib/libcurl-impersonate.dylib \
+        /opt/homebrew/lib/libcurl-impersonate.dylib \
+        $(HOME)/.local/lib/libcurl-impersonate.so))
 endif
 # curl-impersonate builds may carry a static LLVM libunwind and EXPORT its
 # _Unwind_* entry points. On ELF those interpose libgcc_s's for the whole
@@ -223,6 +222,6 @@ $(OBJ_DIR)/input.o:     $(SRC_DIR)/input.cpp     $(INC_DIR)/input.h $(INC_DIR)/t
 $(OBJ_DIR)/main.o:      $(SRC_DIR)/main.cpp      $(INC_DIR)/missav.h $(INC_DIR)/http.h $(INC_DIR)/app.h $(INC_DIR)/log.h $(INC_DIR)/player.h $(INC_DIR)/pornhub.h $(INC_DIR)/types.h $(INC_DIR)/theme.h
 $(OBJ_DIR)/player.o:    $(SRC_DIR)/player.cpp    $(INC_DIR)/player.h $(INC_DIR)/compat.h $(INC_DIR)/types.h $(INC_DIR)/log.h
 $(OBJ_DIR)/tui.o:       $(SRC_DIR)/tui.cpp       $(INC_DIR)/tui.h $(INC_DIR)/types.h $(INC_DIR)/library.h $(INC_DIR)/thumbs.h $(INC_DIR)/theme.h
-$(OBJ_DIR)/pornhub.o: $(SRC_DIR)/pornhub.cpp $(INC_DIR)/pornhub.h $(INC_DIR)/types.h $(INC_DIR)/log.h
+$(OBJ_DIR)/pornhub.o:   $(SRC_DIR)/pornhub.cpp   $(INC_DIR)/pornhub.h $(INC_DIR)/types.h $(INC_DIR)/log.h
 $(OBJ_DIR)/missav.o:    $(SRC_DIR)/missav.cpp    $(INC_DIR)/missav.h $(INC_DIR)/http.h $(INC_DIR)/log.h $(INC_DIR)/types.h
 $(OBJ_DIR)/hls_proxy.o: $(SRC_DIR)/hls_proxy.cpp $(INC_DIR)/hls_proxy.h $(INC_DIR)/http.h $(INC_DIR)/log.h

@@ -9,7 +9,7 @@ namespace ytui {
 #ifdef YTUI_VERSION
 constexpr const char* VERSION = YTUI_VERSION;
 #else
-constexpr const char* VERSION = "0.2.0";
+constexpr const char* VERSION = "0.2.2";
 #endif
 
 struct Video {
