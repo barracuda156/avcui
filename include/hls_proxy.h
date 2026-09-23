@@ -36,6 +36,16 @@ public:
     static std::string wrap(const std::string& url,
                             const std::vector<std::string>& headers,
                             const std::string& impersonate);
+
+    // Given a master playlist URL (typically one wrap() returned), fetch it and
+    // return the absolute URL of the rendition with the greatest height not
+    // above `max_height` — or the smallest one if all are above it. Returns
+    // `master_url` itself if it is not a master playlist or cannot be read.
+    // Blocking: one HTTP round trip.
+    //
+    // Handing a player one rendition rather than the master both honours a
+    // resolution setting and avoids ffmpeg demuxing every rendition at once.
+    static std::string pick_variant(const std::string& master_url, int max_height);
 };
 
 } // namespace ytui

@@ -76,7 +76,7 @@ std::string Pornhub::format_duration(int secs) {
 }
 
 std::vector<Video> Pornhub::search(const std::string& query, int max_results,
-                                      const std::string& cookie_args) {
+                                      const std::string& cookie_args, int start) {
     std::vector<Video> videos;
     Log::write("Searching Pornhub: '%s' (max %d)%s", query.c_str(), max_results,
                cookie_args.empty() ? "" : " [auth]");
@@ -94,8 +94,12 @@ std::vector<Video> Pornhub::search(const std::string& query, int max_results,
     args.push_back("\"https://pornhub.com/video/search?search=" + query + "\"");
     args.push_back("-j");
     args.push_back("--flat-playlist");
+    if (start > 0) {
+        args.push_back("--playlist-start");
+        args.push_back(std::to_string(start + 1));   // 1-based
+    }
     args.push_back("--playlist-end");
-    args.push_back(std::to_string(max_results));
+    args.push_back(std::to_string(start + max_results));
     args.push_back("--no-warnings");
     args.push_back("--ignore-errors");
 

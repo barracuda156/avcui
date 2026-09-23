@@ -33,6 +33,11 @@ public:
     // omitted properties (see `complete` on the result).
     std::vector<Video> search(const std::string& query, int max_results = 20);
 
+    // The next `count` results of the last search(). Recombee pages through a
+    // result set by its recommId ("recommend next items"), not by offset, so
+    // this only works as a continuation. Empty when exhausted.
+    std::vector<Video> search_more(int count);
+
     // Full metadata + the HLS manifest URL for one video page.
     // Pass an existing Http to reuse its connection across a batch — that
     // keep-alive is the main reason this is worth doing natively, and creating
@@ -85,6 +90,12 @@ public:
 private:
     static std::string unpack_packed_m3u8(const std::string& html);
     std::vector<Video> parse_recomms(const std::string& json_body);
+    // Signed POST to Recombee; returns the parsed results and records the
+    // recommId for search_more().
+    std::vector<Video> recombee(const std::string& path, const std::string& body,
+                                const std::string& what);
+
+    std::string last_recomm_id_;
 };
 
 } // namespace ytui

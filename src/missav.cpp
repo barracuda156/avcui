@@ -341,23 +341,13 @@ std::vector<Video> MissAV::parse_recomms(const std::string& body) {
     return out;
 }
 
-std::vector<Video> MissAV::search(const std::string& query, int max_results) {
-    std::vector<Video> out;
-    if (query.empty()) return out;
-
-    std::string path = "/search/users/" + Http::url_encode(anon_user_id()) + "/items/";
-    std::string url  = std::string("https://") + kRecombeeHost + sign_path(path);
-
-    json body = {
-        {"searchQuery",      query},
-        {"count",            max_results},
-        {"cascadeCreate",    true},
-        {"returnProperties", true},
-    };
+std::vector<Video> MissAV::recombee(const std::string& path, const std::string& body,
+                                   const std::string& what) {
+    std::string url = std::string("https://") + kRecombeeHost + sign_path(path);
 
     Http http;
     http.impersonate(kImpersonate);
-    auto r = http.post_json(url, body.dump(), {
+    auto r = http.post_json(url, body, {
         "Accept: application/json",
         "Content-Type: application/json",
         std::string("Origin: ")     + kSite,
@@ -365,18 +355,50 @@ std::vector<Video> MissAV::search(const std::string& query, int max_results) {
         std::string("User-Agent: ") + kUserAgent,
     });
 
-    Log::write("[missav] search '%s' -> HTTP %ld, %zu bytes",
-               query.c_str(), r.status, r.body.size());
+    Log::write("[missav] %s -> HTTP %ld, %zu bytes", what.c_str(), r.status, r.body.size());
     if (!r.ok()) {
         if (r.status == 401 || r.status == 403)
             Log::write("[missav] auth rejected — the public Recombee token has "
                        "probably been rotated (see kPublicToken)");
-        return out;
+        return {};
     }
 
-    out = parse_recomms(r.body);
-    Log::write("[missav] search returned %zu results", out.size());
+    // Paging continues from the ORIGINAL search's recommId (search() clears
+    // it); follow-up responses carry ids of their own, which are not kept.
+    if (last_recomm_id_.empty()) {
+        try {
+            auto j = json::parse(r.body);
+            if (j.contains("recommId") && j["recommId"].is_string())
+                last_recomm_id_ = j["recommId"].get<std::string>();
+        } catch (const std::exception&) {}   // parse_recomms logs the failure
+    }
+
+    auto out = parse_recomms(r.body);
+    Log::write("[missav] %s returned %zu results", what.c_str(), out.size());
     return out;
+}
+
+std::vector<Video> MissAV::search(const std::string& query, int max_results) {
+    last_recomm_id_.clear();
+    if (query.empty()) return {};
+
+    std::string path = "/search/users/" + Http::url_encode(anon_user_id()) + "/items/";
+    json body = {
+        {"searchQuery",      query},
+        {"count",            max_results},
+        {"cascadeCreate",    true},
+        {"returnProperties", true},
+    };
+    return recombee(path, body.dump(), "search '" + query + "'");
+}
+
+std::vector<Video> MissAV::search_more(int count) {
+    if (last_recomm_id_.empty() || count <= 0) return {};
+    // The follow-up inherits the original request's settings, returned
+    // properties included, so the new rows carry thumbnails like the first.
+    std::string path = "/recomms/next/items/" + Http::url_encode(last_recomm_id_);
+    json body = {{"count", count}};
+    return recombee(path, body.dump(), "search (more)");
 }
 
 // ─── detail ───────────────────────────────────────────────────────────────────

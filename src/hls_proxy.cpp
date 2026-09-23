@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -295,6 +296,53 @@ std::string HlsProxy::wrap(const std::string& url,
     std::string rest = url.substr(scheme.size());
     s.allow(rest.substr(0, rest.find('/')), Upstream{headers, impersonate});
     return "http://127.0.0.1:" + std::to_string(s.port()) + "/" + rest;
+}
+
+std::string HlsProxy::pick_variant(const std::string& master_url, int max_height) {
+    Http http;
+    http.set_timeout(15);
+    auto r = http.get(master_url);
+    if (!r.ok() || r.body.find("#EXT-X-STREAM-INF") == std::string::npos) return master_url;
+
+    // #EXT-X-STREAM-INF:...RESOLUTION=WxH...  followed by the URI line.
+    std::string best, lowest;
+    int best_h = -1, lowest_h = 1 << 30;
+    int pending_h = -1;
+    bool pending = false;
+    size_t pos = 0;
+    while (pos < r.body.size()) {
+        size_t eol = r.body.find('\n', pos);
+        if (eol == std::string::npos) eol = r.body.size();
+        std::string line = r.body.substr(pos, eol - pos);
+        pos = eol + 1;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+
+        if (line.rfind("#EXT-X-STREAM-INF", 0) == 0) {
+            pending = true;
+            pending_h = 0;
+            size_t res = line.find("RESOLUTION=");
+            if (res != std::string::npos) {
+                size_t x = line.find('x', res);
+                if (x != std::string::npos) pending_h = atoi(line.c_str() + x + 1);
+            }
+            continue;
+        }
+        if (line[0] == '#' || !pending) continue;
+        pending = false;
+
+        if (pending_h <= max_height && pending_h > best_h) { best_h = pending_h; best = line; }
+        if (pending_h < lowest_h) { lowest_h = pending_h; lowest = line; }
+    }
+    std::string pick = best.empty() ? lowest : best;
+    if (pick.empty()) return master_url;
+    if (pick.find("://") != std::string::npos) return pick;
+
+    std::string base = master_url.substr(0, master_url.find_first_of("?#"));
+    base = base.substr(0, base.find_last_of('/') + 1);
+    Log::write("[hls] rendition %dp picked for max %dp", best.empty() ? lowest_h : best_h,
+               max_height);
+    return base + pick;
 }
 
 } // namespace ytui

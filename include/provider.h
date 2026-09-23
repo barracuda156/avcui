@@ -42,6 +42,10 @@ public:
     virtual std::vector<Video> search(const std::string& query, int max_results,
                                       const std::string& cookie_args) = 0;
 
+    // The next `count` results of the most recent search() (infinite scroll).
+    // Empty when there are no more. Blocking; same thread rules as search().
+    virtual std::vector<Video> search_more(int count, const std::string& cookie_args) = 0;
+
     // True when search() already returns thumbnails/durations, making the
     // background enrichment pass unnecessary.
     virtual bool search_is_complete() const = 0;
@@ -89,7 +93,18 @@ public:
 
     std::vector<Video> search(const std::string& q, int n,
                               const std::string& cookies) override {
-        return backend_.search(q, n, cookies);
+        auto r = backend_.search(q, n, cookies);
+        query_ = q;
+        next_  = (int)r.size();
+        return r;
+    }
+    // yt-dlp pages the site's search itself; asking for a later slice of the
+    // same playlist is all paging takes.
+    std::vector<Video> search_more(int count, const std::string& cookies) override {
+        if (query_.empty()) return {};
+        auto r = backend_.search(query_, count, cookies, next_);
+        next_ += (int)r.size();
+        return r;
     }
     bool search_is_complete() const override { return false; }   // flat stubs only
 
@@ -115,7 +130,9 @@ public:
     }
 
 private:
-    Pornhub backend_;
+    Pornhub     backend_;
+    std::string query_;
+    int         next_ = 0;   // index of the first result not yet fetched
 };
 
 // ─── MissAV (native) ──────────────────────────────────────────────────────────
@@ -132,6 +149,9 @@ public:
         for (const auto& v : r)
             if (v.thumbnail_url.empty()) { complete_ = false; break; }
         return r;
+    }
+    std::vector<Video> search_more(int count, const std::string&) override {
+        return backend_.search_more(count);
     }
     bool search_is_complete() const override { return complete_; }
 

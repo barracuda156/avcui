@@ -15,9 +15,10 @@ public:
     Pornhub();
     ~Pornhub();
 
-    // Search Pornhub, returns list of video results
+    // Search Pornhub, returns list of video results. `start` skips that many
+    // leading results (paging): the batch is results [start, start+max_results).
     std::vector<Video> search(const std::string& query, int max_results = 20,
-                              const std::string& cookie_args = "");
+                              const std::string& cookie_args = "", int start = 0);
 
     // Browse trending/popular
     std::vector<Video> get_trending(int max_results = 20);
