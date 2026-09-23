@@ -16,6 +16,7 @@
 #include "pornhub.h"
 #include "missav.h"
 #include "http.h"
+#include "hls_proxy.h"
 #include "log.h"
 #include <string>
 #include <vector>
@@ -143,7 +144,7 @@ public:
         // One Http for the whole slice: the connection to missav.ws is reused
         // across every item, which is the entire point of not shelling out.
         Http http;
-        http.impersonate("chrome131");
+        http.impersonate(MissAV::impersonate_target());
         for (const auto& u : urls) {
             if (cancel.load()) return;
             auto v = backend_.get_video(u, &http);
@@ -166,7 +167,7 @@ public:
         // 403) retries in well under a second.
         if (!resolve_http_) {
             resolve_http_ = std::make_unique<Http>();
-            resolve_http_->impersonate("chrome131");
+            resolve_http_->impersonate(MissAV::impersonate_target());
             resolve_http_->set_timeout(10);
         }
         for (int attempt = 1; attempt <= 3; attempt++) {
@@ -186,11 +187,18 @@ public:
         return false;
     }
 
-    std::string play_url(const Video& v) const override { return v.stream_url; }
+    // The stream CDN refuses any TLS fingerprint but a browser's, which mpv and
+    // ffmpeg cannot present — so the player reads the manifest and segments
+    // through the loopback proxy, which fetches them impersonating one and
+    // adds the Referer/Origin the CDN also wants. No player headers needed.
+    std::string play_url(const Video& v) const override {
+        return HlsProxy::wrap(v.stream_url, MissAV::http_headers(),
+                              MissAV::impersonate_target());
+    }
     bool direct_stream() const override { return true; }
-    std::vector<std::string> mpv_args() const override { return MissAV::mpv_header_args(); }
+    std::vector<std::string> mpv_args() const override { return {}; }
     const char* thumb_referer() const override { return MissAV::referer(); }
-    std::vector<std::string> stream_headers() const override { return MissAV::http_headers(); }
+    std::vector<std::string> stream_headers() const override { return {}; }
     const char* thumb_user_agent() const override { return MissAV::user_agent(); }
     std::string channel_url(const Video&) const override { return ""; }
 

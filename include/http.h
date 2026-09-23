@@ -13,6 +13,7 @@
 
 #include <string>
 #include <vector>
+#include <dlfcn.h>
 #include <curl/curl.h>
 
 namespace ytui {
@@ -44,25 +45,30 @@ public:
     Http(const Http&) = delete;
     Http& operator=(const Http&) = delete;
 
-    // Ask curl-impersonate to present a browser's TLS/JA3 fingerprint, e.g.
-    // "chrome131". A no-op on stock libcurl (the option is unknown and curl
-    // returns an error we ignore), so the same source builds against either.
-    // This is the standalone C library — nothing to do with Python's curl_cffi,
-    // and not subject to yt-dlp's version gate.
     // Shorter deadline for interactive paths: the default 30s would freeze the
     // UI thread on a hung connection.
     void set_timeout(long seconds) {
         if (curl_) curl_easy_setopt(curl_, CURLOPT_TIMEOUT, seconds);
     }
 
-    void impersonate(const std::string& target) {
-        if (!curl_ || target.empty()) return;
-#ifdef CURLOPT_IMPERSONATE
-        curl_easy_setopt(curl_, CURLOPT_IMPERSONATE, target.c_str());
-#else
-        (void)target;   // stock libcurl: falls back to plain requests + our UA
-#endif
+    // Ask curl-impersonate to present a browser's TLS/HTTP2 fingerprint, e.g.
+    // "chrome131", along with that browser's default headers (ours still win
+    // where both set one). This is the standalone C library — nothing to do
+    // with Python's curl_cffi, and not subject to yt-dlp's version gate.
+    //
+    // curl-impersonate exposes this as a FUNCTION, curl_easy_impersonate(), not
+    // a curl option, so it is looked up at run time: the same source builds and
+    // runs against stock libcurl, where this is a no-op returning false.
+    bool impersonate(const std::string& target) {
+        if (!curl_ || target.empty()) return false;
+        auto fn = impersonate_fn();
+        return fn && fn(curl_, target.c_str(), 1) == CURLE_OK;
     }
+
+    // Whether the libcurl this process loaded is curl-impersonate. Sites behind
+    // Cloudflare's bot rules (MissAV's pages and its stream CDN) reject stock
+    // libcurl's TLS fingerprint whatever headers it sends.
+    static bool impersonation_available() { return impersonate_fn() != nullptr; }
 
     Response get(const std::string& url, const std::vector<std::string>& headers = {}) {
         return perform(url, headers, nullptr);
@@ -85,6 +91,23 @@ public:
 
 private:
     CURL* curl_ = nullptr;
+
+    using ImpersonateFn = CURLcode (*)(CURL*, const char*, int);
+    static ImpersonateFn impersonate_fn() {
+        static ImpersonateFn fn = [] () -> ImpersonateFn {
+            void* imp  = dlsym(RTLD_DEFAULT, "curl_easy_impersonate");
+            void* init = dlsym(RTLD_DEFAULT, "curl_easy_init");
+            // Only usable if our handles come from the same library: with both
+            // stock libcurl and curl-impersonate loaded, curl_easy_init may
+            // resolve to the stock one, and its handle would crash the other.
+            Dl_info a{}, b{};
+            if (!imp || !init || !dladdr(imp, &a) || !dladdr(init, &b) ||
+                a.dli_fbase != b.dli_fbase)
+                return nullptr;
+            return reinterpret_cast<ImpersonateFn>(imp);
+        }();
+        return fn;
+    }
     std::string buf_;
 
     static size_t write_cb(char* p, size_t sz, size_t n, void* ud) {

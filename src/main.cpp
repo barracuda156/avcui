@@ -9,6 +9,7 @@
 #include "thumbs.h"
 #include "termcaps.h"
 #include "missav.h"
+#include "hls_proxy.h"
 #include "http.h"
 
 #include <cstdio>
@@ -760,20 +761,52 @@ int main(int argc, char* argv[]) {
         }
         printf("      stream: %s%s%s\n", C.GREEN, full->stream_url.c_str(), C.RESET);
 
-        // Both CDNs hotlink-protect: a bare fetch of either 403s despite the
-        // URL being correct. Prove it here so a 403 later isn't mistaken for a
-        // bad extraction.
-        printf("\n  checking CDN access (both need a missav Referer)...\n");
+        // Both CDNs are protected, differently: the stream host wants a
+        // missav Referer AND a browser TLS fingerprint, so it is checked the
+        // way the player reaches it — through the loopback proxy. The image
+        // host is fetched with plain curl, exactly as the thumbnail cache does.
+        printf("\n  checking CDN access...\n");
+        printf("      libcurl   : %s\n", ytui::Http::impersonation_available()
+                   ? "curl-impersonate" : "stock — the stream CDN will refuse it");
         fflush(stdout);
+        std::string play = ytui::HlsProxy::wrap(full->stream_url, ytui::MissAV::http_headers(),
+                                                ytui::MissAV::impersonate_target());
+        bool play_ok = false;
         {
-            std::string cmd = std::string("curl -s -o /dev/null -w '%{http_code}' --max-time 10 ")
-                            + "-A '" + ytui::MissAV::user_agent() + "' "
-                            + "-e '" + ytui::MissAV::referer() + "' '" + full->stream_url + "'";
-            FILE* p = popen(cmd.c_str(), "r");
-            char code[8] = {0};
-            if (p) { char* r = fgets(code, sizeof(code), p); (void)r; pclose(p); }
-            printf("      manifest  : HTTP %s%s\n", code,
-                   strncmp(code, "200", 3) == 0 ? "  ok" : "  <- FAILED");
+            ytui::Http h;
+            auto m = h.get(play);
+            // First variant of the master playlist, then its first segment:
+            // proves the rewriting as well as the fetch.
+            std::string variant, segment;
+            auto first_uri = [](const std::string& body) {
+                size_t pos = 0;
+                while (pos < body.size()) {
+                    size_t e = body.find('\n', pos);
+                    if (e == std::string::npos) e = body.size();
+                    std::string l = body.substr(pos, e - pos);
+                    if (!l.empty() && l.back() == '\r') l.pop_back();
+                    if (!l.empty() && l[0] != '#') return l;
+                    pos = e + 1;
+                }
+                return std::string();
+            };
+            auto resolve = [](const std::string& base, const std::string& rel) {
+                if (rel.find("://") != std::string::npos) return rel;
+                return base.substr(0, base.find_last_of('/') + 1) + rel;
+            };
+            printf("      manifest  : HTTP %ld%s\n", m.status, m.ok() ? "  ok" : "  <- FAILED");
+            if (m.ok() && !(variant = first_uri(m.body)).empty()) {
+                variant = resolve(play, variant);
+                auto vr = h.get(variant);
+                printf("      variant   : HTTP %ld%s\n", vr.status, vr.ok() ? "  ok" : "  <- FAILED");
+                if (vr.ok() && !(segment = first_uri(vr.body)).empty()) {
+                    auto sr = h.get(resolve(variant, segment));
+                    bool ts = sr.ok() && !sr.body.empty() && sr.body[0] == 0x47;
+                    printf("      segment   : HTTP %ld, %zu bytes%s\n", sr.status, sr.body.size(),
+                           ts ? "  ok (MPEG-TS)" : "  <- FAILED");
+                    play_ok = ts;
+                }
+            }
         }
         if (!full->thumbnail_url.empty()) {
             std::string cmd = std::string("curl -s -o /dev/null -w '%{http_code}' --max-time 10 ")
@@ -785,13 +818,15 @@ int main(int argc, char* argv[]) {
             printf("      thumbnail : HTTP %s%s\n", code,
                    strncmp(code, "200", 3) == 0 ? "  ok" : "  <- FAILED");
         }
+        if (!play_ok) {
+            printf("\n  %sPLAYBACK PATH FAILED%s — see ~/.cache/avcui/debug.log.\n\n",
+                   C.RED, C.RESET);
+            return 1;
+        }
 
-        printf("\n  %sExtraction OK.%s Play with (headers are required — a bare\n",
+        printf("\n  %sExtraction OK.%s The player is handed the proxied URL;\n",
                C.GREEN, C.RESET);
-        printf("  mpv on this URL returns 403):\n\n      mpv --ytdl=no \\\n");
-        for (const auto& h : ytui::MissAV::mpv_header_args())
-            printf("        \"%s\" \\\n", h.c_str());
-        printf("        '%s'\n\n", full->stream_url.c_str());
+        printf("  it is valid only while this process runs:\n\n      %s\n\n", play.c_str());
         return 0;
     }
 

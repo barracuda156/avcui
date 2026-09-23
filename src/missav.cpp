@@ -8,6 +8,8 @@
 #include <ctime>
 #include <random>
 #include <algorithm>
+#include <atomic>
+#include <regex>
 
 using json = nlohmann::json;
 
@@ -26,6 +28,34 @@ static constexpr const char* kPublicToken  =
 static constexpr const char* kUserAgent =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+// ─── Page mirrors ─────────────────────────────────────────────────────────────
+// missav.ws itself now answers every non-browser client with a Cloudflare
+// "Just a moment..." JS challenge — no TLS fingerprint or header set gets past
+// it. The same site is served, byte for byte, from mirror domains that only
+// check the fingerprint. Video pages are tried here in order; the first one
+// that answers is remembered for the rest of the session.
+//
+// Search (Recombee) and the two CDNs are unaffected — only page fetches move.
+static const char* const kMirrors[] = {
+    "https://missav.ws",
+    "https://missav123.com",
+    "https://missav.live",
+    "https://missav888.com",
+    "https://njavtv.com",
+};
+static constexpr int kMirrorCount = sizeof(kMirrors) / sizeof(kMirrors[0]);
+static std::atomic<int> g_mirror{0};
+
+// Browser whose TLS fingerprint every MissAV request presents.
+static constexpr const char* kImpersonate = "chrome131";
+
+// Cover art lives at a fixed path on the image CDN, keyed by the same id the
+// search returns, and is served without the page. -t is the small (~30 KB)
+// rendition; the page's own og:image is the larger cover-n.
+static std::string cover_url(const std::string& raw_id) {
+    return "https://fourhoi.com/" + raw_id + "/cover-t.jpg";
+}
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -145,6 +175,8 @@ static std::string safe_id(const std::string& raw) {
     return s;
 }
 
+const char* MissAV::impersonate_target() { return kImpersonate; }
+
 const char* MissAV::referer()    { return "https://missav.ws/"; }
 const char* MissAV::user_agent() { return kUserAgent; }
 
@@ -199,6 +231,21 @@ std::string MissAV::meta_content(const std::string& html, const std::string& key
 
 // ─── m3u8 unpacking ───────────────────────────────────────────────────────────
 std::string MissAV::unpack_m3u8(const std::string& html) {
+    std::string url = unpack_packed_m3u8(html);
+    if (!url.empty()) return url;
+
+    // Fallbacks, as upstream's scraper has them: a plain playlist URL anywhere
+    // on the page, then a bare surrit uuid (possibly JSON-escaped slashes).
+    static const std::regex direct(R"(https?://[^\s"']+/playlist\.m3u8)");
+    static const std::regex surrit(R"(https?:[\\/]+surrit\.com[\\/]+([a-f0-9-]+)[\\/]+)");
+    std::smatch m;
+    if (std::regex_search(html, m, direct)) return m.str(0);
+    if (std::regex_search(html, m, surrit))
+        return "https://surrit.com/" + m.str(1) + "/playlist.m3u8";
+    return "";
+}
+
+std::string MissAV::unpack_packed_m3u8(const std::string& html) {
     // The player config is emitted as a packed JS dictionary. Everything between
     // the literal 'm3u8 and the next "video" is a pipe-separated token list
     // which, reversed, spells the manifest URL.
@@ -268,14 +315,26 @@ std::vector<Video> MissAV::parse_recomms(const std::string& body) {
                 return (p.contains(k) && p[k].is_string()) ? p[k].get<std::string>()
                                                            : std::string();
             };
-            v.title         = unescape(str("title"));
+            // "title" is the Japanese original; the pages we link are /en/.
+            v.title         = unescape(str("title_en"));
+            if (v.title.empty()) v.title = unescape(str("title"));
             v.thumbnail_url = str("thumbnail");
             if (v.thumbnail_url.empty()) v.thumbnail_url = str("image");
             if (p.contains("duration") && p["duration"].is_number()) {
                 v.duration_seconds = p["duration"].get<int>();
                 v.duration = fmt_duration(v.duration_seconds);
             }
+            if (p.contains("released_at") && p["released_at"].is_number()) {
+                time_t t = (time_t)p["released_at"].get<double>();
+                char d[16];
+                struct tm tm_utc;
+                if (gmtime_r(&t, &tm_utc) && strftime(d, sizeof(d), "%Y-%m-%d", &tm_utc))
+                    v.upload_date = d;
+            }
         }
+        // The backend no longer returns an image property, but the cover's
+        // location follows from the id — so thumbnails need no page fetch.
+        if (v.thumbnail_url.empty()) v.thumbnail_url = cover_url(id);
         if (v.title.empty()) v.title = id;   // placeholder until detail arrives
         out.push_back(std::move(v));
     }
@@ -297,7 +356,7 @@ std::vector<Video> MissAV::search(const std::string& query, int max_results) {
     };
 
     Http http;
-    http.impersonate("chrome131");
+    http.impersonate(kImpersonate);
     auto r = http.post_json(url, body.dump(), {
         "Accept: application/json",
         "Content-Type: application/json",
@@ -326,17 +385,45 @@ std::optional<Video> MissAV::get_video(const std::string& url, Http* shared) {
 
     Http own;
     Http& http = shared ? *shared : own;
-    if (!shared) http.impersonate("chrome131");
-    auto r = http.get(url, {
+    if (!shared) http.impersonate(kImpersonate);
+
+    // Path below the site root; the host is swapped for whichever mirror is
+    // answering. URLs on any other host are fetched as given.
+    std::string path;
+    for (const char* m : kMirrors) {
+        size_t n = strlen(m);
+        if (url.compare(0, n, m) == 0 && (url.size() == n || url[n] == '/')) {
+            path = url.substr(n);
+            break;
+        }
+    }
+
+    const std::vector<std::string> headers = {
         std::string("User-Agent: ") + kUserAgent,
         std::string("Referer: ")    + kSite + "/",
         "Accept: text/html,application/xhtml+xml",
-    });
+    };
 
-    if (!r.ok()) {
-        Log::write("[missav] detail %s -> HTTP %ld", url.c_str(), r.status);
-        return std::nullopt;
+    Http::Response r;
+    int start = path.empty() ? 0 : g_mirror.load();
+    int tries = path.empty() ? 1 : kMirrorCount;
+    for (int i = 0; i < tries; i++) {
+        int idx = (start + i) % kMirrorCount;
+        std::string page = path.empty() ? url : kMirrors[idx] + path;
+        r = http.get(page, headers);
+        if (r.ok()) {
+            if (!path.empty() && idx != g_mirror.load()) {
+                Log::write("[missav] pages now fetched from %s", kMirrors[idx]);
+                g_mirror.store(idx);
+            }
+            break;
+        }
+        Log::write("[missav] detail %s -> HTTP %ld%s", page.c_str(), r.status,
+                   r.status == 403 ? " (Cloudflare challenge?)" : "");
+        // A missing video is missing on every mirror.
+        if (r.status == 404) break;
     }
+    if (!r.ok()) return std::nullopt;
 
     Video v;
     v.url           = url;

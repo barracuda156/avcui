@@ -5,11 +5,14 @@
 //
 //   SEARCH  POST to MissAV's Recombee recommendation backend — a real JSON API,
 //           HMAC-SHA1 signed. Returns item ids. No HTML anywhere.
+//           Cover art is at a fixed CDN path derived from the id, so search
+//           results carry thumbnails without any page fetch.
 //   DETAIL  One page fetch; everything we need is in <meta> tags, plus the
 //           playlist URL which is packed into a JS blob (see unpack_m3u8).
-//   PLAY    The extracted URL is an HLS manifest, which mpv parses natively.
-//           No stream pre-resolution, so nothing goes stale (unlike the
-//           yt-dlp -g path we had to remove for Pornhub).
+//           missav.ws itself Cloudflare-challenges non-browsers, so pages are
+//           fetched from mirror domains when it refuses (see kMirrors).
+//   PLAY    The extracted URL is an HLS manifest. Its CDN checks the TLS
+//           fingerprint, so players read it through HlsProxy.
 //
 // Ported from EchterAlsFake's unofficial-api-for-missav (AGPL-3.0) — the
 // protocol details, not the code. Deliberately reimplemented so avcui gains no
@@ -39,13 +42,11 @@ public:
     // Playable URL for mpv. Empty until get_video() has run for this entry.
     static std::string playlist_url(const Video& v) { return v.stream_url; }
 
-    // The CDN serving the manifest and its segments (surrit.com) hotlink-
-    // protects them: a bare request gets HTTP 403, even though the URL is
-    // correct. mpv must send the same Referer/Origin/User-Agent we used to
-    // extract it, so these come back as ready-made mpv arguments.
-    //
-    // Also needed for the thumbnail host (fourhoi.com), which is protected the
-    // same way — see Thumbnails::set_referer().
+    // The CDN serving the manifest and its segments (surrit.com) wants the
+    // Referer/Origin/User-Agent we used to extract it AND a browser TLS
+    // fingerprint; a request missing either gets HTTP 403. Headers alone are
+    // not enough for mpv, which is why playback goes through HlsProxy — these
+    // args remain for the --missav-test hint.
     static std::vector<std::string> mpv_header_args();
 
     // Raw "Name: value" headers the stream CDN requires (Referer, Origin,
@@ -55,6 +56,10 @@ public:
     // Referer/User-Agent this provider's image CDN expects.
     static const char* referer();
     static const char* user_agent();
+
+    // curl-impersonate target every MissAV request presents. Without
+    // curl-impersonate linked, page fetches and the stream CDN both 403.
+    static const char* impersonate_target();
 
     // No external binary is required, unlike the yt-dlp providers.
     static bool is_available() { return true; }
@@ -69,14 +74,16 @@ public:
     // REVERSED, spell out the URL: [1]=scheme, [2]=subdomain, [3]=domain,
     // [4..8]=the five uuid segments. Yields:
     //     <scheme>://<sub>.<domain>/<a>-<b>-<c>-<d>-<e>/playlist.m3u8
-    // Returns "" if the blob is missing or too short — callers must treat an
-    // empty result as "not playable" rather than assuming success.
+    // Falls back to a literal playlist URL or a bare surrit uuid on the page.
+    // Returns "" if none is found — callers must treat an empty result as
+    // "not playable" rather than assuming success.
     static std::string unpack_m3u8(const std::string& html);
 
     // Pull <meta property="..."> / <meta name="..."> content by attribute value.
     static std::string meta_content(const std::string& html, const std::string& key);
 
 private:
+    static std::string unpack_packed_m3u8(const std::string& html);
     std::vector<Video> parse_recomms(const std::string& json_body);
 };
 
