@@ -17,6 +17,7 @@
 #include "missav.h"
 #include "http.h"
 #include "hls_proxy.h"
+#include "search_options.h"
 #include "log.h"
 #include <string>
 #include <vector>
@@ -41,6 +42,12 @@ public:
     virtual const char* name() const = 0;
     virtual std::vector<Video> search(const std::string& query, int max_results,
                                       const std::string& cookie_args) = 0;
+
+    // Sort and filters for the following search() and its search_more()
+    // pages. Options outside caps() are ignored. Default: as before.
+    void set_search_options(const SearchOptions& o) { options_ = o; }
+    const SearchOptions& search_options() const { return options_; }
+    virtual SearchCaps search_caps() const = 0;
 
     // The next `count` results of the most recent search() (infinite scroll).
     // Empty when there are no more. Blocking; same thread rules as search().
@@ -84,6 +91,9 @@ public:
     static bool valid(const std::string& name) {
         return name == "pornhub" || name == "missav";
     }
+
+protected:
+    SearchOptions options_;
 };
 
 // ─── Pornhub (yt-dlp) ─────────────────────────────────────────────────────────
@@ -93,16 +103,25 @@ public:
 
     std::vector<Video> search(const std::string& q, int n,
                               const std::string& cookies) override {
-        auto r = backend_.search(q, n, cookies);
+        auto r = backend_.search(q, n, cookies, 0, options_);
         query_ = q;
+        opts_  = options_;   // pages continue with what page 1 used
         next_  = (int)r.size();
         return r;
+    }
+    SearchCaps search_caps() const override {
+        SearchCaps c;
+        c.sort_newest = c.sort_longest = c.sort_most_viewed = c.sort_top_rated = true;
+        c.duration = true;
+        c.duration_limit = 30;
+        c.hd_only = true;
+        return c;
     }
     // yt-dlp pages the site's search itself; asking for a later slice of the
     // same playlist is all paging takes.
     std::vector<Video> search_more(int count, const std::string& cookies) override {
         if (query_.empty()) return {};
-        auto r = backend_.search(query_, count, cookies, next_);
+        auto r = backend_.search(query_, count, cookies, next_, opts_);
         next_ += (int)r.size();
         return r;
     }
@@ -130,8 +149,9 @@ public:
     }
 
 private:
-    Pornhub     backend_;
-    std::string query_;
+    Pornhub       backend_;
+    std::string   query_;
+    SearchOptions opts_;
     int         next_ = 0;   // index of the first result not yet fetched
 };
 
@@ -142,7 +162,7 @@ public:
 
     std::vector<Video> search(const std::string& q, int n,
                               const std::string&) override {
-        auto r = backend_.search(q, n);
+        auto r = backend_.search(q, n, options_);
         // Recombee is asked for item properties; whether it returns them is its
         // decision, so this is measured per search rather than assumed.
         complete_ = !r.empty();
@@ -152,6 +172,13 @@ public:
     }
     std::vector<Video> search_more(int count, const std::string&) override {
         return backend_.search_more(count);
+    }
+    SearchCaps search_caps() const override {
+        SearchCaps c;
+        c.uncensored = true;
+        c.duration = true;
+        c.english_subtitles = true;
+        return c;
     }
     bool search_is_complete() const override { return complete_; }
 

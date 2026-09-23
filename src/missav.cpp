@@ -378,7 +378,26 @@ std::vector<Video> MissAV::recombee(const std::string& path, const std::string& 
     return out;
 }
 
-std::vector<Video> MissAV::search(const std::string& query, int max_results) {
+std::string MissAV::filter_for(const SearchOptions& opts) {
+    std::vector<std::string> terms;
+    if (opts.uncensored == SearchOptions::Uncensored::Only)
+        terms.push_back("'is_uncensored_leak' == true");
+    else if (opts.uncensored == SearchOptions::Uncensored::Exclude)
+        terms.push_back("'is_uncensored_leak' == false");
+    if (opts.min_minutes > 0)
+        terms.push_back("'duration' >= " + std::to_string(opts.min_minutes * 60));
+    if (opts.max_minutes > 0)
+        terms.push_back("'duration' <= " + std::to_string(opts.max_minutes * 60));
+    if (opts.english_subtitles)
+        terms.push_back("'has_english_subtitle' == true");
+
+    std::string f;
+    for (const auto& t : terms) f += (f.empty() ? "" : " and ") + t;
+    return f;
+}
+
+std::vector<Video> MissAV::search(const std::string& query, int max_results,
+                                  const SearchOptions& opts) {
     last_recomm_id_.clear();
     if (query.empty()) return {};
 
@@ -389,7 +408,11 @@ std::vector<Video> MissAV::search(const std::string& query, int max_results) {
         {"cascadeCreate",    true},
         {"returnProperties", true},
     };
-    return recombee(path, body.dump(), "search '" + query + "'");
+    // Follow-up pages (search_more) inherit it from this request.
+    const std::string filter = filter_for(opts);
+    if (!filter.empty()) body["filter"] = filter;
+    return recombee(path, body.dump(),
+                    "search '" + query + "'" + (filter.empty() ? "" : " [" + filter + "]"));
 }
 
 std::vector<Video> MissAV::search_more(int count) {

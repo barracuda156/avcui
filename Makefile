@@ -216,12 +216,12 @@ uninstall:
 	@echo "Uninstalled"
 
 # ─── Dependencies ───────────────────────────────────────────────────────────────
-$(OBJ_DIR)/app.o:       $(SRC_DIR)/app.cpp       $(INC_DIR)/app.h $(INC_DIR)/types.h $(INC_DIR)/tui.h $(INC_DIR)/pornhub.h $(INC_DIR)/player.h $(INC_DIR)/input.h $(INC_DIR)/config.h $(INC_DIR)/library.h $(INC_DIR)/log.h $(INC_DIR)/thumbs.h $(INC_DIR)/auth.h $(INC_DIR)/theme.h $(INC_DIR)/provider.h $(INC_DIR)/missav.h $(INC_DIR)/http.h $(INC_DIR)/hls_proxy.h
+$(OBJ_DIR)/app.o:       $(SRC_DIR)/app.cpp       $(INC_DIR)/app.h $(INC_DIR)/types.h $(INC_DIR)/tui.h $(INC_DIR)/pornhub.h $(INC_DIR)/player.h $(INC_DIR)/input.h $(INC_DIR)/config.h $(INC_DIR)/library.h $(INC_DIR)/log.h $(INC_DIR)/thumbs.h $(INC_DIR)/auth.h $(INC_DIR)/theme.h $(INC_DIR)/provider.h $(INC_DIR)/missav.h $(INC_DIR)/http.h $(INC_DIR)/hls_proxy.h $(INC_DIR)/search_options.h
 $(OBJ_DIR)/config.o:    $(SRC_DIR)/config.cpp    $(INC_DIR)/config.h $(INC_DIR)/theme.h
 $(OBJ_DIR)/input.o:     $(SRC_DIR)/input.cpp     $(INC_DIR)/input.h $(INC_DIR)/types.h
 $(OBJ_DIR)/main.o:      $(SRC_DIR)/main.cpp      $(INC_DIR)/missav.h $(INC_DIR)/http.h $(INC_DIR)/app.h $(INC_DIR)/log.h $(INC_DIR)/player.h $(INC_DIR)/pornhub.h $(INC_DIR)/types.h $(INC_DIR)/theme.h
 $(OBJ_DIR)/player.o:    $(SRC_DIR)/player.cpp    $(INC_DIR)/player.h $(INC_DIR)/compat.h $(INC_DIR)/types.h $(INC_DIR)/log.h
 $(OBJ_DIR)/tui.o:       $(SRC_DIR)/tui.cpp       $(INC_DIR)/tui.h $(INC_DIR)/types.h $(INC_DIR)/library.h $(INC_DIR)/thumbs.h $(INC_DIR)/theme.h
-$(OBJ_DIR)/pornhub.o:   $(SRC_DIR)/pornhub.cpp   $(INC_DIR)/pornhub.h $(INC_DIR)/types.h $(INC_DIR)/log.h
-$(OBJ_DIR)/missav.o:    $(SRC_DIR)/missav.cpp    $(INC_DIR)/missav.h $(INC_DIR)/http.h $(INC_DIR)/log.h $(INC_DIR)/types.h
+$(OBJ_DIR)/pornhub.o:   $(SRC_DIR)/pornhub.cpp   $(INC_DIR)/pornhub.h $(INC_DIR)/types.h $(INC_DIR)/log.h $(INC_DIR)/search_options.h
+$(OBJ_DIR)/missav.o:    $(SRC_DIR)/missav.cpp    $(INC_DIR)/missav.h $(INC_DIR)/http.h $(INC_DIR)/log.h $(INC_DIR)/types.h $(INC_DIR)/search_options.h
 $(OBJ_DIR)/hls_proxy.o: $(SRC_DIR)/hls_proxy.cpp $(INC_DIR)/hls_proxy.h $(INC_DIR)/http.h $(INC_DIR)/log.h

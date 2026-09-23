@@ -75,8 +75,40 @@ std::string Pornhub::format_duration(int secs) {
     return buf;
 }
 
+std::string Pornhub::search_url(const std::string& query, const SearchOptions& opts) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string q;
+    for (unsigned char c : query) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') q += (char)c;
+        else if (c == ' ') q += '+';
+        else { q += '%'; q += hex[c >> 4]; q += hex[c & 0xF]; }
+    }
+    std::string url = "https://pornhub.com/video/search?search=" + q;
+
+    switch (opts.sort) {
+        case SearchOptions::Sort::Newest:     url += "&o=mr"; break;
+        case SearchOptions::Sort::Longest:    url += "&o=lg"; break;
+        case SearchOptions::Sort::MostViewed: url += "&o=mv"; break;
+        case SearchOptions::Sort::TopRated:   url += "&o=tr"; break;
+        default: break;
+    }
+    if (opts.hd_only) url += "&hd=1";
+    // The site only knows 10/20/30-minute bounds: a lower bound rounds down
+    // to one of them and an upper bound up, so no matching video is lost.
+    if (opts.min_minutes > 0) {
+        int m = opts.min_minutes >= 30 ? 30 : opts.min_minutes >= 20 ? 20 : 10;
+        url += "&min_duration=" + std::to_string(m);
+    }
+    if (opts.max_minutes > 0 && opts.max_minutes <= 30) {
+        int m = opts.max_minutes <= 10 ? 10 : opts.max_minutes <= 20 ? 20 : 30;
+        url += "&max_duration=" + std::to_string(m);
+    }
+    return url;
+}
+
 std::vector<Video> Pornhub::search(const std::string& query, int max_results,
-                                      const std::string& cookie_args, int start) {
+                                      const std::string& cookie_args, int start,
+                                      const SearchOptions& opts) {
     std::vector<Video> videos;
     Log::write("Searching Pornhub: '%s' (max %d)%s", query.c_str(), max_results,
                cookie_args.empty() ? "" : " [auth]");
@@ -91,7 +123,7 @@ std::vector<Video> Pornhub::search(const std::string& query, int max_results,
     }
 
     // Pornhub search URL pattern
-    args.push_back("\"https://pornhub.com/video/search?search=" + query + "\"");
+    args.push_back("\"" + search_url(query, opts) + "\"");
     args.push_back("-j");
     args.push_back("--flat-playlist");
     if (start > 0) {

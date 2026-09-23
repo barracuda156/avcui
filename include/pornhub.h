@@ -7,6 +7,7 @@
 #include <atomic>
 #include <sys/types.h>
 #include "types.h"
+#include "search_options.h"
 
 namespace ytui {
 
@@ -18,7 +19,13 @@ public:
     // Search Pornhub, returns list of video results. `start` skips that many
     // leading results (paging): the batch is results [start, start+max_results).
     std::vector<Video> search(const std::string& query, int max_results = 20,
-                              const std::string& cookie_args = "", int start = 0);
+                              const std::string& cookie_args = "", int start = 0,
+                              const SearchOptions& opts = {});
+
+    // The site's search page URL for `query` with `opts` applied (sort, HD,
+    // duration). The query is percent-encoded: it ends up inside a shell
+    // command line, where a raw " $ or ` would otherwise be interpreted.
+    static std::string search_url(const std::string& query, const SearchOptions& opts);
 
     // Browse trending/popular
     std::vector<Video> get_trending(int max_results = 20);

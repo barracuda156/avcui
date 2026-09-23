@@ -21,6 +21,7 @@
 // BUILD: needs libcurl (or curl-impersonate) and OpenSSL libcrypto for HMAC.
 
 #include "types.h"
+#include "search_options.h"
 #include <string>
 #include <vector>
 #include <optional>
@@ -31,7 +32,12 @@ class MissAV {
 public:
     // Search. One HTTPS round-trip; no per-video fetch unless the backend
     // omitted properties (see `complete` on the result).
-    std::vector<Video> search(const std::string& query, int max_results = 20);
+    std::vector<Video> search(const std::string& query, int max_results = 20,
+                              const SearchOptions& opts = {});
+
+    // The Recombee ReQL filter for `opts` ("" when nothing is filtered).
+    // Sorting is not expressible: Recombee ranks search results itself.
+    static std::string filter_for(const SearchOptions& opts);
 
     // The next `count` results of the last search(). Recombee pages through a
     // result set by its recommId ("recommend next items"), not by offset, so
