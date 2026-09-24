@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <cstring>
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
@@ -43,6 +44,23 @@ bool MpvIPC::try_connect() {
         close(fd);          // socket not there yet — mpv still starting
         return false;
     }
+    // mpv closes its end when it quits (its window closed, say). A write that
+    // lands before we have read that EOF would raise SIGPIPE, whose default
+    // action kills the whole app without a word. Have it fail with EPIPE
+    // instead: MSG_NOSIGNAL on each send where it exists (Linux, newer BSDs),
+    // else SO_NOSIGPIPE on the socket (Mac OS X 10.2 and later), else -- Mac
+    // OS X 10.0/10.1 and anything else with neither -- ignore SIGPIPE for the
+    // whole process, once.
+#if !defined(MSG_NOSIGNAL) && defined(SO_NOSIGPIPE)
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#elif !defined(MSG_NOSIGNAL)
+    static bool sigpipe_ignored = false;
+    if (!sigpipe_ignored) {
+        signal(SIGPIPE, SIG_IGN);
+        sigpipe_ignored = true;
+    }
+#endif
     // Non-blocking reads; writes stay blocking but are tiny and rare.
     int flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
@@ -68,7 +86,11 @@ bool MpvIPC::send_raw(const std::string& data) {
     msg += '\n';
     // Best-effort write. If it would block or errors, drop the connection;
     // the caller keeps working via the SIGSTOP fallback / last-known cache.
-    ssize_t n = write(fd_, msg.c_str(), msg.size());
+#ifdef MSG_NOSIGNAL
+    ssize_t n = send(fd_, msg.c_str(), msg.size(), MSG_NOSIGNAL);
+#else
+    ssize_t n = send(fd_, msg.c_str(), msg.size(), 0);   // see try_connect()
+#endif
     if (n < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) return true; // rare; skip
         disconnect();
